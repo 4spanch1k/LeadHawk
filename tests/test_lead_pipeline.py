@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+
+from db import Database
+from lead_extractor import detect_category, extract_budget, extract_lead
+from lead_filter import is_lead
+from models import PublicMessage
+
+
+class LeadFilterTests(unittest.TestCase):
+    def test_accepts_project_request(self) -> None:
+        self.assertTrue(
+            is_lead("Нужно сделать Telegram bot, бюджет 100 000 тг. Пишите @client_user")
+        )
+
+    def test_rejects_job_post(self) -> None:
+        self.assertFalse(
+            is_lead("Вакансия: ищем frontend senior в штат, зарплата по итогам интервью")
+        )
+
+    def test_project_signal_can_override_generic_job_word(self) -> None:
+        self.assertTrue(
+            is_lead("Ищу разработчика. Разовая задача: сделать лендинг, бюджет 50000 тг")
+        )
+
+
+class LeadExtractionTests(unittest.TestCase):
+    def test_extracts_budget_currency_and_category(self) -> None:
+        budget, currency = extract_budget("Нужен лендинг. Бюджет: 50 000 тг")
+        self.assertEqual(budget, "50 000 тг")
+        self.assertEqual(currency, "KZT")
+        self.assertEqual(detect_category("Нужен telegram mini app"), "mini_app")
+
+    def test_builds_complete_lead(self) -> None:
+        now = datetime.now(timezone.utc)
+        message = PublicMessage(
+            source_username="public_chat",
+            message_id=42,
+            message_link="https://t.me/public_chat/42",
+            published_at=now,
+            sender_username="author",
+            raw_text="Нужно сделать сайт. Бюджет 1000 USD. Контакт @client_user",
+        )
+        lead = extract_lead(message, collected_at=now)
+        self.assertEqual(lead.currency, "USD")
+        self.assertIn("@client_user", lead.contact_usernames)
+        self.assertGreater(lead.lead_score, 0)
+
+
+class DatabaseTests(unittest.TestCase):
+    def test_empty_database_stats_and_export_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "leads.db")
+            database.initialize()
+            self.assertEqual(database.stats()["total_sources"], 0)
+            self.assertEqual(database.export_rows(), [])
+
+    def test_prevents_duplicate_leads(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "leads.db")
+            database.initialize()
+            now = datetime.now(timezone.utc)
+            lead = extract_lead(
+                PublicMessage(
+                    source_username="public_chat",
+                    message_id=1,
+                    message_link="https://t.me/public_chat/1",
+                    published_at=now,
+                    sender_username=None,
+                    raw_text="Нужно сделать сайт, бюджет 100 000 тг",
+                ),
+                collected_at=now,
+            )
+            self.assertTrue(database.save_lead(lead))
+            self.assertFalse(database.save_lead(lead))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
