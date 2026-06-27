@@ -117,6 +117,18 @@ class Database:
                 (status, now, now, error_message, username),
             )
 
+    def record_source_error(self, username: str, error_message: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE sources
+                SET updated_at = ?, last_checked_at = ?, error_message = ?
+                WHERE username = ?
+                """,
+                (now, now, error_message, username),
+            )
+
     def save_lead(self, lead: Lead) -> bool:
         with self.connect() as connection:
             cursor = connection.execute(
@@ -199,7 +211,10 @@ class Database:
             "total_sources": total_sources,
             "sources_by_status": {row["status"]: row["count"] for row in status_rows},
             "recent_leads": recent_leads,
-            "top_categories": [(row["category"], row["count"]) for row in top_categories],
-            "top_sources": [(row["source_username"], row["count"]) for row in top_sources],
+            "top_categories": [
+                (row["category"], row["count"]) for row in top_categories
+            ],
+            "top_sources": [
+                (row["source_username"], row["count"]) for row in top_sources
+            ],
         }
-

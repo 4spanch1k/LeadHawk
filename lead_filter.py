@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-from constants import GOOD_KEYWORDS, JOB_KEYWORDS, PROJECT_SIGNALS
-from utils import normalize_text
+from constants import (
+    GOOD_KEYWORDS,
+    JOB_KEYWORDS,
+    PROJECT_SIGNALS,
+    STRONG_JOB_KEYWORDS,
+)
+from text_processing import normalize_text
 
 
 def looks_like_job(text: str) -> bool:
     normalized = f" {normalize_text(text)} "
-    job_matches = sum(keyword in normalized for keyword in JOB_KEYWORDS)
-    project_matches = sum(signal in normalized for signal in PROJECT_SIGNALS)
-    return job_matches > 0 and project_matches == 0
+    if any(keyword in normalized for keyword in STRONG_JOB_KEYWORDS):
+        return True
+    has_job_signal = any(keyword in normalized for keyword in JOB_KEYWORDS)
+    has_project_signal = any(signal in normalized for signal in PROJECT_SIGNALS)
+    return has_job_signal and not has_project_signal
 
 
 def is_lead(text: str) -> bool:
@@ -16,4 +23,3 @@ def is_lead(text: str) -> bool:
     if not normalized or not any(keyword in normalized for keyword in GOOD_KEYWORDS):
         return False
     return not looks_like_job(normalized)
-

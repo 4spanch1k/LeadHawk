@@ -85,4 +85,3 @@ def load_settings() -> Settings:
     )
     settings.ensure_directories()
     return settings
-

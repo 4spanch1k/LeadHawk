@@ -5,21 +5,27 @@ import asyncio
 import logging
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from config import Settings, load_settings
 from db import Database
-from utils import configure_logging
 
 LOGGER = logging.getLogger(__name__)
 COMMANDS = ("discover", "parse", "export", "run", "stats")
 
 
+def configure_logging(logs_dir: Path) -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(logs_dir / "lead_parser.log", encoding="utf-8"),
+        ],
+    )
+
+
 def discover(settings: Settings, database: Database) -> bool:
-    if not settings.google_configured:
-        LOGGER.error(
-            "Google API не настроен: заполните GOOGLE_API_KEY и GOOGLE_CX в .env"
-        )
-        return False
     from google_finder import GoogleFinder
 
     try:
@@ -32,11 +38,6 @@ def discover(settings: Settings, database: Database) -> bool:
 
 
 def parse_sources(settings: Settings, database: Database) -> bool:
-    if not settings.telegram_configured:
-        LOGGER.error(
-            "Telegram API не настроен: заполните TG_API_ID, TG_API_HASH и TG_PHONE"
-        )
-        return False
     from telegram_parser import TelegramParser
 
     try:
@@ -51,16 +52,15 @@ def parse_sources(settings: Settings, database: Database) -> bool:
     return True
 
 
-def export(settings: Settings, database: Database) -> bool:
+def export(settings: Settings, database: Database) -> None:
     from exporter import export_leads
 
     output_path = settings.data_dir / "leads.csv"
     count = export_leads(database, output_path)
     print(f"Экспортировано лидов: {count}. Файл: {output_path}")
-    return True
 
 
-def print_stats(database: Database) -> bool:
+def print_stats(database: Database) -> None:
     stats = database.stats()
     statuses = stats["sources_by_status"]
     print(f"Источников всего: {stats['total_sources']}")
@@ -80,7 +80,6 @@ def print_stats(database: Database) -> bool:
             print(f"  @{source}: {count}")
     else:
         print("  нет данных")
-    return True
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -108,19 +107,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "parse":
         return 0 if parse_sources(settings, database) else 1
     if args.command == "export":
-        return 0 if export(settings, database) else 1
+        export(settings, database)
+        return 0
     if args.command == "stats":
-        return 0 if print_stats(database) else 1
+        print_stats(database)
+        return 0
 
-    steps = (
-        ("discover", lambda: discover(settings, database)),
-        ("parse", lambda: parse_sources(settings, database)),
-        ("export", lambda: export(settings, database)),
-    )
-    success = True
-    for name, step in steps:
-        LOGGER.info("Запуск этапа: %s", name)
-        success = step() and success
+    LOGGER.info("Запуск этапа: discover")
+    success = discover(settings, database)
+    LOGGER.info("Запуск этапа: parse")
+    success = parse_sources(settings, database) and success
+    LOGGER.info("Запуск этапа: export")
+    export(settings, database)
     return 0 if success else 1
 
 

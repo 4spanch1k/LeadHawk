@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import datetime, timezone
 
 from models import Lead, PublicMessage
 from scoring import score_lead
-from utils import build_unique_hash, normalize_text
+from text_processing import normalize_text
 
 USERNAME_PATTERN = re.compile(r"(?<![\w@])@([A-Za-z][A-Za-z0-9_]{4,31})")
 PHONE_PATTERN = re.compile(r"(?<!\d)(?:\+?\d[\s()\-]*){10,15}(?!\d)")
@@ -19,7 +20,10 @@ BUDGET_PATTERN = re.compile(
 
 CATEGORY_KEYWORDS = (
     ("mini_app", ("telegram mini app", "mini app", "мини апп")),
-    ("telegram_bot", ("telegram bot", "телеграм бот", "тг бот", "tg bot", "бот в телеграм")),
+    (
+        "telegram_bot",
+        ("telegram bot", "телеграм бот", "тг бот", "tg bot", "бот в телеграм"),
+    ),
     ("landing", ("лендинг", "landing page")),
     ("website", ("сайт",)),
     ("parser", ("парсер", "скрапер", "scraping", "parser")),
@@ -44,7 +48,7 @@ def extract_budget(text: str) -> tuple[str | None, str]:
         value = match.group(1).strip(" :,.")
         if not re.search(r"\d", value):
             continue
-        context = text[max(0, match.start() - 12):match.end() + 8].lower()
+        context = text[max(0, match.start() - 12) : match.end() + 8].lower()
         if "₸" in value or "тг" in value.lower():
             currency = "KZT"
         elif "₽" in value or "руб" in value.lower():
@@ -53,12 +57,30 @@ def extract_budget(text: str) -> tuple[str | None, str]:
             currency = "USD"
         elif "€" in value or "eur" in value.lower():
             currency = "EUR"
-        elif "бюджет" in context or "оплата" in context or " до " in context:
+        elif (
+            re.search(r"\d\s*(?:к|k|тыс\.?)\b", value.lower())
+            or "бюджет" in context
+            or "оплата" in context
+            or " до " in context
+        ):
             currency = "unknown"
         else:
             continue
         return value, currency
     return None, "unknown"
+
+
+def build_unique_hash(
+    source_username: str,
+    message_id: int | None,
+    raw_text: str,
+) -> str:
+    identity = (
+        f"{source_username.lower()}:{message_id}"
+        if message_id is not None
+        else f"{source_username.lower()}:{normalize_text(raw_text)}"
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 def summarize_task(text: str, max_length: int = 180) -> str:
@@ -74,9 +96,16 @@ def extract_lead(
     *,
     collected_at: datetime | None = None,
 ) -> Lead:
-    contacts = tuple(sorted({f"@{value}" for value in USERNAME_PATTERN.findall(message.raw_text)}))
+    contacts = tuple(
+        sorted({f"@{value}" for value in USERNAME_PATTERN.findall(message.raw_text)})
+    )
     phones = tuple(
-        sorted({re.sub(r"\s+", " ", value).strip() for value in PHONE_PATTERN.findall(message.raw_text)})
+        sorted(
+            {
+                re.sub(r"\s+", " ", value).strip()
+                for value in PHONE_PATTERN.findall(message.raw_text)
+            }
+        )
     )
     budget, currency = extract_budget(message.raw_text)
     category = detect_category(message.raw_text)

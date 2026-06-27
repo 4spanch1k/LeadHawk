@@ -15,9 +15,9 @@ from models import Source
 
 LOGGER = logging.getLogger(__name__)
 TELEGRAM_LINK_PATTERN = re.compile(
-    r"(?i)(?:https?://)?(?:www\.)?t\.me/(?:s/)?([A-Za-z][A-Za-z0-9_]{3,31})"
+    r"(?i)(?:https?://)?(?:www\.)?t\.me/(?:s/)?([A-Za-z][A-Za-z0-9_]{4,31})"
 )
-RESERVED_PATHS = {"joinchat", "share", "addstickers", "proxy", "iv", "login"}
+RESERVED_PATHS = {"c", "joinchat", "share", "addstickers", "proxy", "iv", "login"}
 
 
 def extract_public_sources(value: str, discovered_from: str) -> list[Source]:
@@ -50,8 +50,11 @@ class GoogleFinder:
 
         found_count = 0
         saved_count = 0
+        request_count = 0
         for query in queries:
             for page in range(self.settings.google_pages_per_query):
+                if request_count:
+                    time.sleep(self.settings.request_delay_seconds)
                 params = {
                     "key": self.settings.google_api_key,
                     "cx": self.settings.google_cx,
@@ -67,6 +70,7 @@ class GoogleFinder:
                     )
                     response.raise_for_status()
                     payload = response.json()
+                    request_count += 1
                 except requests.RequestException as exc:
                     LOGGER.error("Ошибка Google API для запроса %r: %s", query, exc)
                     break
@@ -83,6 +87,4 @@ class GoogleFinder:
 
                 if len(items) < 10:
                     break
-                time.sleep(self.settings.request_delay_seconds)
-            time.sleep(self.settings.request_delay_seconds)
         return found_count, saved_count

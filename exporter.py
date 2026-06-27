@@ -27,4 +27,3 @@ def export_leads(database: Database, output_path: Path) -> int:
     frame = pd.DataFrame(rows, columns=EXPORT_COLUMNS)
     frame.to_csv(output_path, index=False, encoding="utf-8-sig")
     return len(frame)
-

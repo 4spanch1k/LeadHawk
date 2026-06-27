@@ -38,4 +38,3 @@ class Lead:
     raw_text: str
     lead_score: int
     unique_hash: str
-

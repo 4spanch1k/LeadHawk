@@ -105,14 +105,11 @@ class TelegramParser:
             )
         except UNAVAILABLE_ERRORS as exc:
             LOGGER.warning("Источник @%s недоступен: %s", username, exc)
-            self.database.update_source_status(
-                username, SOURCE_UNAVAILABLE, str(exc)
-            )
+            self.database.update_source_status(username, SOURCE_UNAVAILABLE, str(exc))
         except (TimeoutError, asyncio.TimeoutError) as exc:
             LOGGER.warning("Таймаут источника @%s: %s", username, exc)
-            self.database.update_source_status(username, SOURCE_ACTIVE, "Timeout")
+            self.database.record_source_error(username, "Timeout")
         except Exception as exc:
             LOGGER.exception("Ошибка парсинга @%s", username)
-            self.database.update_source_status(username, SOURCE_ACTIVE, str(exc))
+            self.database.record_source_error(username, str(exc))
         return checked, saved
-

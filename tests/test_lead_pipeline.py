@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import csv
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
 from db import Database
+from exporter import EXPORT_COLUMNS, export_leads
+from google_finder import extract_public_sources
 from lead_extractor import detect_category, extract_budget, extract_lead
 from lead_filter import is_lead
 from models import PublicMessage
@@ -14,17 +17,28 @@ from models import PublicMessage
 class LeadFilterTests(unittest.TestCase):
     def test_accepts_project_request(self) -> None:
         self.assertTrue(
-            is_lead("Нужно сделать Telegram bot, бюджет 100 000 тг. Пишите @client_user")
+            is_lead(
+                "Нужно сделать Telegram bot, бюджет 100 000 тг. Пишите @client_user"
+            )
         )
 
     def test_rejects_job_post(self) -> None:
         self.assertFalse(
-            is_lead("Вакансия: ищем frontend senior в штат, зарплата по итогам интервью")
+            is_lead(
+                "Вакансия: ищем frontend senior в штат, зарплата по итогам интервью"
+            )
         )
 
     def test_project_signal_can_override_generic_job_word(self) -> None:
         self.assertTrue(
-            is_lead("Ищу разработчика. Разовая задача: сделать лендинг, бюджет 50000 тг")
+            is_lead(
+                "Ищу разработчика. Разовая задача: сделать лендинг, бюджет 50000 тг"
+            )
+        )
+
+    def test_strong_job_signal_is_not_overridden_by_project_word(self) -> None:
+        self.assertFalse(
+            is_lead("Вакансия frontend-разработчика в проект, зарплата 300 000 руб")
         )
 
 
@@ -34,6 +48,11 @@ class LeadExtractionTests(unittest.TestCase):
         self.assertEqual(budget, "50 000 тг")
         self.assertEqual(currency, "KZT")
         self.assertEqual(detect_category("Нужен telegram mini app"), "mini_app")
+
+    def test_extracts_short_budget_without_currency(self) -> None:
+        budget, currency = extract_budget("Нужно сделать сайт за 50к")
+        self.assertEqual(budget, "50к")
+        self.assertEqual(currency, "unknown")
 
     def test_builds_complete_lead(self) -> None:
         now = datetime.now(timezone.utc)
@@ -79,6 +98,39 @@ class DatabaseTests(unittest.TestCase):
             self.assertFalse(database.save_lead(lead))
 
 
+class GoogleSourceExtractionTests(unittest.TestCase):
+    def test_extracts_supported_public_links_and_removes_duplicates(self) -> None:
+        sources = extract_public_sources(
+            "https://t.me/s/PublicChannel/123 и t.me/publicchannel",
+            "query",
+        )
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].username, "publicchannel")
+        self.assertEqual(sources[0].url, "https://t.me/publicchannel")
+
+    def test_ignores_internal_and_invalid_paths(self) -> None:
+        sources = extract_public_sources(
+            "https://t.me/c/123/4 https://t.me/share/url https://t.me/abcd",
+            "query",
+        )
+        self.assertEqual(sources, [])
+
+
+class ExportTests(unittest.TestCase):
+    def test_exports_empty_csv_with_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = Database(root / "leads.db")
+            database.initialize()
+            output_path = root / "leads.csv"
+
+            exported_count = export_leads(database, output_path)
+
+            self.assertEqual(exported_count, 0)
+            with output_path.open(encoding="utf-8-sig", newline="") as csv_file:
+                rows = list(csv.reader(csv_file))
+            self.assertEqual(rows, [EXPORT_COLUMNS])
+
+
 if __name__ == "__main__":
     unittest.main()
-

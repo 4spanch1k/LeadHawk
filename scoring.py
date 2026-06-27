@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from constants import HIGH_VALUE_CATEGORIES, PROJECT_SIGNALS
 from lead_filter import looks_like_job
-from utils import normalize_text
+from text_processing import normalize_text
 
 
 def score_lead(
@@ -45,4 +45,3 @@ def score_lead(
     if len(normalized) < 30:
         score -= 20
     return max(0, min(100, score))
-
