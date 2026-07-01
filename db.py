@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from constants import SOURCE_NEW
-from models import Lead, Source
+from models import DatabaseStats, Lead, Source, StoredLead
 
 
 class Database:
@@ -181,7 +181,73 @@ class Database:
             result.append(record)
         return result
 
-    def stats(self) -> dict[str, Any]:
+    def latest_lead_id(self) -> int:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM leads"
+            ).fetchone()
+        return int(row[0])
+
+    def list_leads_after(
+        self,
+        lead_id: int,
+        *,
+        minimum_score: int = 0,
+    ) -> list[StoredLead]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, published_at, source_username, category, lead_score,
+                       task_summary, budget, currency, contact_usernames,
+                       sender_username, message_link, raw_text
+                FROM leads
+                WHERE id > ? AND lead_score >= ?
+                ORDER BY published_at DESC, lead_score DESC
+                """,
+                (lead_id, minimum_score),
+            ).fetchall()
+        return [self._deserialize_lead_row(row) for row in rows]
+
+    def list_latest_leads(
+        self,
+        limit: int = 10,
+        *,
+        minimum_score: int = 0,
+    ) -> list[StoredLead]:
+        safe_limit = max(1, min(limit, 50))
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, published_at, source_username, category, lead_score,
+                       task_summary, budget, currency, contact_usernames,
+                       sender_username, message_link, raw_text
+                FROM leads
+                WHERE lead_score >= ?
+                ORDER BY published_at DESC, lead_score DESC
+                LIMIT ?
+                """,
+                (minimum_score, safe_limit),
+            ).fetchall()
+        return [self._deserialize_lead_row(row) for row in rows]
+
+    @staticmethod
+    def _deserialize_lead_row(row: sqlite3.Row) -> StoredLead:
+        return StoredLead(
+            id=row["id"],
+            published_at=row["published_at"],
+            source_username=row["source_username"],
+            category=row["category"],
+            lead_score=row["lead_score"],
+            task_summary=row["task_summary"],
+            budget=row["budget"],
+            currency=row["currency"],
+            contact_usernames=tuple(json.loads(row["contact_usernames"])),
+            sender_username=row["sender_username"],
+            message_link=row["message_link"],
+            raw_text=row["raw_text"],
+        )
+
+    def stats(self) -> DatabaseStats:
         since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         with self.connect() as connection:
             total_sources = connection.execute(
@@ -207,14 +273,10 @@ class Database:
                 ORDER BY count DESC, source_username ASC LIMIT 5
                 """
             ).fetchall()
-        return {
-            "total_sources": total_sources,
-            "sources_by_status": {row["status"]: row["count"] for row in status_rows},
-            "recent_leads": recent_leads,
-            "top_categories": [
-                (row["category"], row["count"]) for row in top_categories
-            ],
-            "top_sources": [
-                (row["source_username"], row["count"]) for row in top_sources
-            ],
-        }
+        return DatabaseStats(
+            total_sources=total_sources,
+            sources_by_status={row["status"]: row["count"] for row in status_rows},
+            recent_leads=recent_leads,
+            top_categories=[(row["category"], row["count"]) for row in top_categories],
+            top_sources=[(row["source_username"], row["count"]) for row in top_sources],
+        )

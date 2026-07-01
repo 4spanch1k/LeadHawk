@@ -71,8 +71,27 @@ class GoogleFinder:
                     response.raise_for_status()
                     payload = response.json()
                     request_count += 1
+                except requests.HTTPError as exc:
+                    status_code = (
+                        exc.response.status_code if exc.response else "unknown"
+                    )
+                    if status_code in {401, 403}:
+                        raise RuntimeError(
+                            f"Google API отклонил запрос ({status_code}). "
+                            "Проверьте API key, ограничения ключа, CX и квоту."
+                        ) from exc
+                    LOGGER.error(
+                        "Google API вернул HTTP %s для запроса %r",
+                        status_code,
+                        query,
+                    )
+                    break
                 except requests.RequestException as exc:
-                    LOGGER.error("Ошибка Google API для запроса %r: %s", query, exc)
+                    LOGGER.error(
+                        "Сетевая ошибка Google API (%s) для запроса %r",
+                        type(exc).__name__,
+                        query,
+                    )
                     break
 
                 items = payload.get("items", [])

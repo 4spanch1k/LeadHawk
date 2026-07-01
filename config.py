@@ -29,6 +29,30 @@ def _non_negative_float(name: str, default: float) -> float:
     return value
 
 
+def _optional_positive_int(name: str) -> int | None:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return None
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} должен быть целым числом") from exc
+    if value <= 0:
+        raise ValueError(f"{name} должен быть больше нуля")
+    return value
+
+
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} должен быть целым числом") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} должен быть от {minimum} до {maximum}")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     tg_api_id: int | None
@@ -36,6 +60,11 @@ class Settings:
     tg_phone: str | None
     google_api_key: str | None
     google_cx: str | None
+    bot_token: str | None
+    bot_owner_id: int | None
+    bot_auto_run_interval_minutes: int
+    bot_notification_min_score: int
+    bot_max_notifications: int
     database_path: Path
     hours_lookback: int
     max_messages_per_source: int
@@ -52,6 +81,10 @@ class Settings:
     @property
     def google_configured(self) -> bool:
         return bool(self.google_api_key and self.google_cx)
+
+    @property
+    def bot_configured(self) -> bool:
+        return bool(self.bot_token and self.bot_owner_id)
 
     def ensure_directories(self) -> None:
         for path in (
@@ -74,6 +107,15 @@ def load_settings() -> Settings:
         tg_phone=os.getenv("TG_PHONE") or None,
         google_api_key=os.getenv("GOOGLE_API_KEY") or None,
         google_cx=os.getenv("GOOGLE_CX") or None,
+        bot_token=os.getenv("BOT_TOKEN") or None,
+        bot_owner_id=_optional_positive_int("BOT_OWNER_ID"),
+        bot_auto_run_interval_minutes=_bounded_int(
+            "BOT_AUTO_RUN_INTERVAL_MINUTES", 0, 0, 10_080
+        ),
+        bot_notification_min_score=_bounded_int(
+            "BOT_NOTIFICATION_MIN_SCORE", 0, 0, 100
+        ),
+        bot_max_notifications=_bounded_int("BOT_MAX_NOTIFICATIONS", 20, 1, 100),
         database_path=database_path,
         hours_lookback=_positive_int("HOURS_LOOKBACK", 24),
         max_messages_per_source=_positive_int("MAX_MESSAGES_PER_SOURCE", 300),

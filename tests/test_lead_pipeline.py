@@ -12,6 +12,7 @@ from google_finder import extract_public_sources
 from lead_extractor import detect_category, extract_budget, extract_lead
 from lead_filter import is_lead
 from models import PublicMessage
+from bot_messages import format_lead
 
 
 class LeadFilterTests(unittest.TestCase):
@@ -97,6 +98,42 @@ class DatabaseTests(unittest.TestCase):
             self.assertTrue(database.save_lead(lead))
             self.assertFalse(database.save_lead(lead))
 
+    def test_lists_only_leads_after_given_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "leads.db")
+            database.initialize()
+            now = datetime.now(timezone.utc)
+            first_lead = extract_lead(
+                PublicMessage(
+                    source_username="public_chat",
+                    message_id=1,
+                    message_link="https://t.me/public_chat/1",
+                    published_at=now,
+                    sender_username=None,
+                    raw_text="Нужно сделать сайт, бюджет 100 000 тг",
+                ),
+                collected_at=now,
+            )
+            database.save_lead(first_lead)
+            previous_id = database.latest_lead_id()
+            second_lead = extract_lead(
+                PublicMessage(
+                    source_username="public_chat",
+                    message_id=2,
+                    message_link="https://t.me/public_chat/2",
+                    published_at=now,
+                    sender_username="client",
+                    raw_text="Нужен telegram bot, бюджет 500 USD",
+                ),
+                collected_at=now,
+            )
+            database.save_lead(second_lead)
+
+            leads = database.list_leads_after(previous_id)
+
+            self.assertEqual(len(leads), 1)
+            self.assertEqual(leads[0]["message_link"], second_lead.message_link)
+
 
 class GoogleSourceExtractionTests(unittest.TestCase):
     def test_extracts_supported_public_links_and_removes_duplicates(self) -> None:
@@ -130,6 +167,26 @@ class ExportTests(unittest.TestCase):
             with output_path.open(encoding="utf-8-sig", newline="") as csv_file:
                 rows = list(csv.reader(csv_file))
             self.assertEqual(rows, [EXPORT_COLUMNS])
+
+
+class TelegramBotFormattingTests(unittest.TestCase):
+    def test_escapes_lead_content_for_html(self) -> None:
+        formatted = format_lead(
+            {
+                "lead_score": 90,
+                "category": "website",
+                "source_username": "public_chat",
+                "budget": "1000",
+                "currency": "USD",
+                "contact_usernames": ("@client",),
+                "sender_username": None,
+                "task_summary": "Нужен сайт <срочно>",
+                "message_link": "https://t.me/public_chat/1",
+            }
+        )
+
+        self.assertIn("Нужен сайт &lt;срочно&gt;", formatted)
+        self.assertIn("1000 USD", formatted)
 
 
 if __name__ == "__main__":

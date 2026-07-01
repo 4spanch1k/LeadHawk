@@ -11,7 +11,7 @@ from config import Settings, load_settings
 from db import Database
 
 LOGGER = logging.getLogger(__name__)
-COMMANDS = ("discover", "parse", "export", "run", "stats")
+COMMANDS = ("discover", "parse", "export", "run", "stats", "bot")
 
 
 def configure_logging(logs_dir: Path) -> None:
@@ -26,38 +26,43 @@ def configure_logging(logs_dir: Path) -> None:
 
 
 def discover(settings: Settings, database: Database) -> bool:
-    from google_finder import GoogleFinder
+    from lead_collection import LeadCollection
 
     try:
-        found, saved = GoogleFinder(settings, database).discover()
+        result = LeadCollection(settings, database).discover()
     except RuntimeError as exc:
         LOGGER.error("%s", exc)
         return False
-    print(f"Google: найдено ссылок — {found}, новых источников — {saved}")
+    print(
+        f"Google: найдено ссылок — {result.links_found}, "
+        f"новых источников — {result.sources_saved}"
+    )
     return True
 
 
 def parse_sources(settings: Settings, database: Database) -> bool:
-    from telegram_parser import TelegramParser
+    from lead_collection import LeadCollection
 
     try:
-        checked, saved = asyncio.run(TelegramParser(settings, database).parse())
+        result = asyncio.run(LeadCollection(settings, database).parse())
     except RuntimeError as exc:
         LOGGER.error("%s", exc)
         return False
     except (KeyboardInterrupt, EOFError):
         LOGGER.error("Авторизация Telegram прервана")
         return False
-    print(f"Telegram: проверено сообщений — {checked}, сохранено лидов — {saved}")
+    print(
+        f"Telegram: проверено сообщений — {result.messages_checked}, "
+        f"сохранено лидов — {result.leads_saved}"
+    )
     return True
 
 
 def export(settings: Settings, database: Database) -> None:
-    from exporter import export_leads
+    from lead_collection import LeadCollection
 
-    output_path = settings.data_dir / "leads.csv"
-    count = export_leads(database, output_path)
-    print(f"Экспортировано лидов: {count}. Файл: {output_path}")
+    result = LeadCollection(settings, database).export()
+    print(f"Экспортировано лидов: {result.leads_exported}. Файл: {result.output_path}")
 
 
 def print_stats(database: Database) -> None:
@@ -111,6 +116,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "stats":
         print_stats(database)
+        return 0
+    if args.command == "bot":
+        from telegram_bot import run_bot
+
+        try:
+            run_bot(settings, database)
+        except RuntimeError as exc:
+            LOGGER.error("%s", exc)
+            return 1
+        except KeyboardInterrupt:
+            LOGGER.info("Telegram-бот остановлен")
         return 0
 
     LOGGER.info("Запуск этапа: discover")
